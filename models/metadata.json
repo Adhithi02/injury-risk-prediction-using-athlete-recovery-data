@@ -1,0 +1,33 @@
+{
+  "best_model": "logreg",
+  "feature_columns": [
+    "stress",
+    "acwr",
+    "atl",
+    "ctl28",
+    "ctl42",
+    "daily_load",
+    "monotony",
+    "strain",
+    "weekly_load",
+    "daily_load_roll7",
+    "daily_load_roll14",
+    "weekly_load_roll7",
+    "weekly_load_roll14",
+    "strain_roll7",
+    "strain_roll14",
+    "monotony_roll7",
+    "monotony_roll14",
+    "acwr_roll7",
+    "acwr_roll14",
+    "atl_roll7",
+    "atl_roll14",
+    "ctl28_roll7",
+    "ctl28_roll14",
+    "ctl42_roll7",
+    "ctl42_roll14",
+    "stress_lag1",
+    "stress_lag7"
+  ],
+  "best_threshold": 0.7111568056262914
+}

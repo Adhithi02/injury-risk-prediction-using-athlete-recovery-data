@@ -1,0 +1,16 @@
+{
+  "roc_auc": 0.4842592592592593,
+  "c_index": 0.4842592592592593,
+  "precision": 0.10606060606060606,
+  "recall": 0.5833333333333334,
+  "f1": 0.1794871794871795,
+  "threshold": 0.2833333333333333,
+  "plots": {
+    "roc": "reports\\plots\\random_forest_roc.png",
+    "pr": "reports\\plots\\random_forest_pr.png",
+    "confusion": "reports\\plots\\random_forest_confusion.png"
+  },
+  "accuracy": 0.564625850340136,
+  "average_precision": 0.08103465333366118,
+  "model": "random_forest"
+}

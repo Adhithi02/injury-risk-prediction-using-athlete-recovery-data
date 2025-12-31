@@ -1,0 +1,433 @@
+🏋️‍♂️ INJURY PREDICTION PROJECT - COMPLETE METHODOLOGY EXPLANATION
+================================================================
+
+📋 TABLE OF CONTENTS
+===================
+1. PROJECT OVERVIEW
+2. DATA SOURCES & STRUCTURE
+3. FEATURE ENGINEERING PARAMETERS
+4. LABELING STRATEGY
+5. MODEL TRAINING APPROACH
+6. EVALUATION METRICS
+7. PREDICTION OUTPUTS
+8. RECOMMENDATION SYSTEM
+9. FILE STRUCTURE & WORKFLOW
+10. PARAMETER VALUES & CALCULATIONS
+
+================================================================
+1. PROJECT OVERVIEW
+================================================================
+
+GOAL: Predict whether an athlete will get injured in the next 10-15 days using daily wellness and training load data.
+
+APPROACH: Binary classification with probability scores for daywise and weekwise predictions. The
+decision threshold is tuned during training to prioritize precision with a minimum recall floor
+(default 0.20). The tuned threshold is saved and used across CLI predictions and the Streamlit UI.
+
+KEY INNOVATION: Uses both subjective wellness metrics and objective training load metrics to create a comprehensive risk assessment.
+
+================================================================
+2. DATA SOURCES & STRUCTURE
+================================================================
+
+INPUT DATA CATEGORIES:
+
+A) WELLNESS DATA (Subjective Daily Reports):
+   - fatigue.csv: Player fatigue levels (0-10 scale)
+   - mood.csv: Player mood ratings (0-10 scale)
+   - readiness.csv: Player readiness to train (0-10 scale)
+   - sleep_duration.csv: Hours of sleep per night
+   - sleep_quality.csv: Sleep quality rating (0-10 scale)
+   - soreness.csv: Muscle soreness levels (0-10 scale)
+   - stress.csv: Stress levels (0-10 scale)
+
+B) TRAINING LOAD DATA (Objective Metrics):
+   - daily_load.csv: Daily training load units
+   - weekly_load.csv: Weekly accumulated load
+   - strain.csv: Training strain index
+   - monotony.csv: Training monotony index
+   - acwr.csv: Acute:Chronic Workload Ratio
+   - atl.csv: Acute Training Load (7-day average)
+   - ctl28.csv: Chronic Training Load (28-day average)
+   - ctl42.csv: Chronic Training Load (42-day average)
+
+C) INJURY DATA:
+   - injury.csv: Injury occurrence logs with timestamps
+
+DATA PROCESSING:
+- Each CSV contains multiple players (columns) with daily data (rows)
+- Player columns are aggregated using MEAN to create team-level metrics
+- Date columns are standardized to "date" format
+- Missing dates are handled with outer joins
+
+================================================================
+3. FEATURE ENGINEERING PARAMETERS
+================================================================
+
+A) ROLLING AVERAGES:
+   Parameters Used:
+   - Window Size 7 days: min_periods=3
+   - Window Size 14 days: min_periods=5
+   
+   Applied to Load Metrics:
+   - daily_load_roll7, daily_load_roll14
+   - weekly_load_roll7, weekly_load_roll14
+   - strain_roll7, strain_roll14
+   - monotony_roll7, monotony_roll14
+   - acwr_roll7, acwr_roll14
+   - atl_roll7, atl_roll14
+   - ctl28_roll7, ctl28_roll14
+   - ctl42_roll7, ctl42_roll14
+
+   Purpose: Smooth out daily variations and capture trends
+
+B) LAG FEATURES:
+   Parameters Used:
+   - Lag 1 day: Previous day's value
+   - Lag 7 days: Previous week's value
+   
+   Applied to Wellness Metrics:
+   - fatigue_lag1, fatigue_lag7
+   - stress_lag1, stress_lag7
+   - soreness_lag1, soreness_lag7
+   - sleep_quality_lag1, sleep_quality_lag7
+   - sleep_duration_lag1, sleep_duration_lag7
+   - readiness_lag1, readiness_lag7
+   - mood_lag1, mood_lag7
+
+   Purpose: Capture temporal dependencies and recovery patterns
+
+C) STRESS-RECOVERY INDEX:
+   Formula: (stress + soreness) / (sleep_quality + readiness)
+   
+   Parameters:
+   - Lower bound clipping: 1e-6 (prevents division by zero)
+   - Missing values: filled with 0 for stress/soreness
+   
+   Interpretation:
+   - Higher values = worse stress-recovery balance
+   - Lower values = better recovery state
+
+================================================================
+4. LABELING STRATEGY
+================================================================
+
+TARGET VARIABLE: label_next_10_15 (Binary: 0 or 1)
+
+LABELING PARAMETERS:
+- min_days_ahead = 10 days
+- max_days_ahead = 15 days
+- Threshold = 0.5 (for binary classification)
+
+LABELING LOGIC:
+1. For each day, check if ANY injury occurs in the next 10-15 days
+2. If injury occurs in [current_day + 10, current_day + 15]: label = 1
+3. Otherwise: label = 0
+
+IMPLEMENTATION:
+- Uses calendar day logic for non-daily data
+- Uses index-based logic for daily data (more efficient)
+- Handles multiple injuries per day by taking maximum
+
+PURPOSE: Creates prediction window that's clinically relevant for intervention
+
+================================================================
+5. MODEL TRAINING APPROACH
+================================================================
+
+A) DATA SPLIT:
+   Method: Time-based split (not random)
+   Parameters:
+   - Training: 80% of data (chronologically first)
+   - Testing: 20% of data (chronologically last)
+   
+   Rationale: Maintains temporal order for realistic evaluation
+
+B) FEATURE PREPARATION:
+   - Select all numeric columns except 'date' and 'label_next_10_15'
+   - Fill missing values with column medians
+   - Standardize features using StandardScaler
+
+C) MODELS TRAINED:
+   
+   1) LOGISTIC REGRESSION:
+      Parameters:
+      - max_iter = 1000
+      - class_weight = "balanced" (handles class imbalance)
+      - n_jobs = 1
+      
+   2) RANDOM FOREST:
+      Parameters:
+      - n_estimators = 300
+      - max_depth = None (no limit)
+      - random_state = 42
+      - class_weight = "balanced_subsample"
+      - n_jobs = -1 (use all cores)
+
+D) MODEL SELECTION & THRESHOLD TUNING:
+   - Selection Criterion: Highest ROC-AUC score on the time-based holdout
+   - Threshold Tuning: Select classification threshold that maximizes precision while
+     enforcing a minimum recall (>= 0.20). This tuned value is persisted as best_threshold.
+   - Persistence: Per-model metrics are stored at reports/metrics_<model>.json; overall
+     selection and feature list are stored in models/metadata.json.
+
+================================================================
+6. EVALUATION METRICS
+================================================================
+
+A) PRIMARY METRIC - C-INDEX (Concordance Index):
+   Range: 0.0 to 1.0
+   Interpretation:
+   - 0.5 = Random chance (no predictive power)
+   - 1.0 = Perfect prediction
+   - >0.7 = Good model
+   - >0.8 = Excellent model
+   
+   Calculation:
+   - Compare all pairs of samples with different outcomes
+   - Count concordant pairs (higher risk score for injured athlete)
+   - C-index = concordant_pairs / total_comparable_pairs
+
+B) SECONDARY METRICS:
+
+   1) ROC-AUC:
+      Range: 0.0 to 1.0
+      Interpretation: Same as C-index for binary classification
+      
+   2) Precision:
+      Formula: True Positives / (True Positives + False Positives)
+      Interpretation: Of predicted injuries, how many were correct?
+      
+   3) Recall (Sensitivity):
+      Formula: True Positives / (True Positives + False Negatives)
+      Interpretation: Of actual injuries, how many did we catch?
+      
+   4) F1-Score:
+      Formula: 2 * (Precision * Recall) / (Precision + Recall)
+      Interpretation: Harmonic mean of precision and recall
+      
+   5) Specificity:
+      Formula: True Negatives / (True Negatives + False Positives)
+      Interpretation: Of non-injuries, how many did we correctly identify?
+
+C) CONFUSION MATRIX:
+   - True Positives: Correctly predicted injuries
+   - False Positives: Incorrectly predicted injuries (false alarms)
+   - True Negatives: Correctly predicted non-injuries
+   - False Negatives: Missed injuries
+
+D) INJURY STATISTICS:
+   - Actual Injury Rate: Percentage of days with injuries
+   - Predicted Injury Rate: Percentage of days predicted as high-risk
+
+================================================================
+7. PREDICTION OUTPUTS
+================================================================
+
+A) DAILY PREDICTIONS (daily_predictions.csv):
+   Columns:
+   - date: Date of prediction
+   - injury_risk: Probability of injury (0.0 to 1.0)
+   - risk_label: Binary prediction (0 or 1) using the saved tuned threshold (best_threshold)
+   - recommendations: Text recommendations for that day
+
+B) WEEKLY PREDICTIONS (weekly_predictions.csv):
+   Columns:
+   - year_week: ISO week format (YYYY-WW)
+   - mean: Average daily risk for the week
+   - max: Maximum daily risk for the week
+
+C) RISK INTERPRETATION:
+   - 0.0-0.3: Low risk (green zone)
+   - 0.3-0.6: Medium risk (yellow zone)
+   - 0.6-1.0: High risk (red zone)
+
+================================================================
+8. RECOMMENDATION SYSTEM
+================================================================
+
+RECOMMENDATION RULES (Heuristic-based):
+
+A) HIGH ACWR (>1.5):
+   Recommendation: "High ACWR: Reduce training intensity, monitor acute spikes."
+   Rationale: ACWR >1.5 indicates high injury risk
+
+B) LOW SLEEP DURATION (<7 hours):
+   Recommendation: "Low sleep duration: Target ≥ 7 hours, prioritize recovery."
+   Rationale: Sleep <7 hours impairs recovery
+
+C) HIGH FATIGUE (≥7):
+   Recommendation: "High fatigue: Add low-intensity or rest day; monitor wellness."
+   Rationale: Fatigue ≥7 indicates overreaching
+
+D) HIGH MONOTONY (>2.0):
+   Recommendation: "High monotony: Increase training variation to lower strain."
+   Rationale: Monotony >2.0 increases injury risk
+
+E) HIGH STRESS-RECOVERY INDEX (>1.2):
+   Recommendation: "Imbalanced stress-recovery: Improve sleep and readiness before increasing load."
+   Rationale: Poor stress-recovery balance increases injury risk
+
+================================================================
+9. FILE STRUCTURE & WORKFLOW
+================================================================
+
+INPUT FILES:
+data/raw/
+├── wellness/
+│   ├── fatigue.csv
+│   ├── mood.csv
+│   ├── readiness.csv
+│   ├── sleep_duration.csv
+│   ├── sleep_quality.csv
+│   ├── soreness.csv
+│   └── stress.csv
+├── training-load/
+│   ├── acwr.csv
+│   ├── atl.csv
+│   ├── ctl28.csv
+│   ├── ctl42.csv
+│   ├── daily_load.csv
+│   ├── monotony.csv
+│   ├── strain.csv
+│   └── weekly_load.csv
+└── injury/
+    └── injury.csv
+
+OUTPUT FILES:
+data/processed/
+└── master_dataset.csv
+
+models/
+├── model_best.joblib
+├── model_logreg.joblib
+├── model_random_forest.joblib
+└── metadata.json (includes best_model, feature_columns, best_threshold)
+
+reports/
+├── metrics_overall.json
+├── metrics_logreg.json (includes roc_auc, c_index, precision, recall, f1, accuracy, average_precision, threshold, plots)
+└── metrics_random_forest.json (same fields as above)
+
+predictions/
+├── daily_predictions.csv
+└── weekly_predictions.csv
+
+Streamlit App (app.py):
+ - Tabs: Quick Prediction, Historical Analysis, Batch Processing, Model Insights, Risk Dashboard,
+   Scenario Testing, User Guide
+ - Features: Model selection (trained models only), optional threshold override, interactive Plotly
+   charts, role-based user guide, batch CSV scoring and downloads
+
+WORKFLOW:
+1. python data_preprocessing.py → Creates master_dataset.csv
+2. python train_model.py → Trains models, tunes threshold, saves artifacts and metrics
+3. python predict.py → Generates daily/weekly predictions and images
+4. streamlit run app.py → Interactive dashboard for inputs, analytics, and reports
+
+================================================================
+10. PARAMETER VALUES & CALCULATIONS
+================================================================
+
+A) FEATURE ENGINEERING PARAMETERS:
+   Rolling Windows:
+   - 7-day window: min_periods=3 (need at least 3 days)
+   - 14-day window: min_periods=5 (need at least 5 days)
+   
+   Lag Features:
+   - 1-day lag: Previous day
+   - 7-day lag: Previous week
+   
+   Stress-Recovery Index:
+   - Lower bound: 1e-6 (prevents division by zero)
+   - Missing handling: 0 for stress/soreness
+
+B) LABELING PARAMETERS:
+   Prediction Window:
+   - min_days_ahead = 10 days
+   - max_days_ahead = 15 days
+   
+   Classification Threshold:
+   - threshold = 0.5 (50% probability)
+
+C) MODEL PARAMETERS:
+   Data Split:
+   - Training: 80% (chronologically first)
+   - Testing: 20% (chronologically last)
+   
+   Logistic Regression:
+   - max_iter = 1000
+   - class_weight = "balanced"
+   
+   Random Forest:
+   - n_estimators = 300
+   - max_depth = None
+   - class_weight = "balanced_subsample"
+
+D) RECOMMENDATION THRESHOLDS:
+   - ACWR > 1.5
+   - Sleep duration < 7 hours
+   - Fatigue ≥ 7
+   - Monotony > 2.0
+   - Stress-recovery index > 1.2
+
+E) EVALUATION THRESHOLDS:
+   - C-index > 0.7: Good model
+   - C-index > 0.8: Excellent model
+   - ROC-AUC > 0.7: Good discrimination
+   - Precision > 0.5: More true positives than false positives
+   - Recall > 0.5: Catch more than half of injuries
+
+================================================================
+MATHEMATICAL FORMULAS
+================================================================
+
+1) ROLLING AVERAGE:
+   roll7[t] = (1/7) * Σ(x[t-6] to x[t])
+   roll14[t] = (1/14) * Σ(x[t-13] to x[t])
+
+2) STRESS-RECOVERY INDEX:
+   SRI[t] = (stress[t] + soreness[t]) / (sleep_quality[t] + readiness[t])
+
+3) C-INDEX:
+   C = Σ(I(y_i > y_j) * I(s_i > s_j)) / Σ(I(y_i ≠ y_j))
+   Where: y = true labels, s = predicted scores, I = indicator function
+
+4) PRECISION:
+   P = TP / (TP + FP)
+
+5) RECALL:
+   R = TP / (TP + FN)
+
+6) F1-SCORE:
+   F1 = 2 * (P * R) / (P + R)
+
+7) ROC-AUC:
+   AUC = ∫ TPR(FPR) dFPR
+   Where TPR = True Positive Rate, FPR = False Positive Rate
+
+================================================================
+CLINICAL INTERPRETATION
+================================================================
+
+INJURY RISK LEVELS:
+- Low Risk (0.0-0.3): Normal training can continue
+- Medium Risk (0.3-0.6): Monitor closely, consider load reduction
+- High Risk (0.6-1.0): Reduce training intensity, focus on recovery
+
+KEY RISK FACTORS:
+1. High ACWR (>1.5): Acute load spike relative to chronic load
+2. Poor Sleep (<7 hours): Impaired recovery and adaptation
+3. High Fatigue (≥7): Indicates overreaching/overtraining
+4. High Monotony (>2.0): Lack of training variation
+5. Poor Stress-Recovery Balance: Imbalanced load and recovery
+
+INTERVENTION STRATEGIES:
+- Load Management: Reduce intensity/volume
+- Recovery Enhancement: Improve sleep, nutrition
+- Training Variation: Increase exercise diversity
+- Monitoring: Increase wellness tracking frequency
+
+================================================================
+END OF DOCUMENTATION
+================================================================
